@@ -1,7 +1,13 @@
+import os
 from sqlalchemy import create_engine, Column, Integer, String, Date
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-engine = create_engine("sqlite:///resort.db")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///resort.db")
+
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg2://", 1)
+
+engine = create_engine(DATABASE_URL)
 Base = declarative_base()
 
 class Room(Base):
