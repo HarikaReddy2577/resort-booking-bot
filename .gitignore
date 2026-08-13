@@ -1,0 +1,8 @@
+.env
+token.json
+credentials.json
+resort.db
+ngrok Installer/
+venv/
+__pycache__/
+*.pyc

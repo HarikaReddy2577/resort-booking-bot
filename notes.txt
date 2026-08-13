@@ -1,0 +1,5 @@
+Room: has a number, a type
+Booking: has a room, guest name, guest phone, check-in date, check-out date, status
+
+Rule: A room can't be booked if someone else already has it booked 
+for overlapping dates.
