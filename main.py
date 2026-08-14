@@ -6,6 +6,7 @@ from fastapi.responses import PlainTextResponse, HTMLResponse
 from pydantic import BaseModel
 from datetime import date as date_type
 import calendar
+from xml.sax.saxutils import escape as xml_escape
 from models import SessionLocal, Booking, Room
 from conflict_check import has_conflict
 
@@ -359,7 +360,7 @@ def search_page():
     </head>
     <body>
         <div class="card">
-            <h2>Check Availability & Book</h2>
+            <h2>Check Availability and Book</h2>
 
             <div class="date-row">
                 <div class="date-field">
@@ -643,7 +644,7 @@ def booking_calendar(year: int = None, month: int = None):
                 <h2>{month_name} {year}</h2>
                 <a href="/calendar?year={next_year}&month={next_month}">Next &rarr;</a>
             </div>
-            <div class="search-link"><a href="/search">&rarr; Search & Book by dates</a></div>
+            <div class="search-link"><a href="/search">&rarr; Search and Book by dates</a></div>
             <table>
                 <tr><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th><th>Sun</th></tr>
                 {rows}
@@ -776,7 +777,7 @@ async def whatsapp_webhook(Body: str = Form(...), From: str = Form(...)):
                 s.close()
                 reply = f"Total active bookings today: {count}"
             else:
-                reply = "Choose an option:\n1. Check Availability & Book (Calendar)\n2. Book (manual entry)\n3. Cancel\n4. Total Bookings"
+                reply = "Choose an option:\n1. Check Availability and Book (Calendar)\n2. Book (manual entry)\n3. Cancel\n4. Total Bookings"
 
         elif step == "book_room":
             data["room_id"] = int(msg)
@@ -834,7 +835,7 @@ async def whatsapp_webhook(Body: str = Form(...), From: str = Form(...)):
                 reply = "Invalid booking ID. Please enter a numeric booking ID (e.g. 12 or BK0012)."
                 session = {"step": None, "data": {}}
                 SESSIONS[From] = session
-                twiml = f"<Response><Message>{reply}</Message></Response>"
+                twiml = f"<Response><Message>{xml_escape(reply)}</Message></Response>"
                 return PlainTextResponse(content=twiml, media_type="application/xml")
 
             s = SessionLocal()
@@ -852,7 +853,7 @@ async def whatsapp_webhook(Body: str = Form(...), From: str = Form(...)):
 
         else:
             session = {"step": None, "data": {}}
-            reply = "Choose an option:\n1. Check Availability & Book (Calendar)\n2. Book (manual entry)\n3. Cancel\n4. Total Bookings"
+            reply = "Choose an option:\n1. Check Availability and Book (Calendar)\n2. Book (manual entry)\n3. Cancel\n4. Total Bookings"
 
         SESSIONS[From] = session
 
@@ -861,5 +862,5 @@ async def whatsapp_webhook(Body: str = Form(...), From: str = Form(...)):
         reply = "Sorry, something went wrong. Type anything to see the menu again."
         SESSIONS[From] = {"step": None, "data": {}}
 
-    twiml = f"<Response><Message>{reply}</Message></Response>"
+    twiml = f"<Response><Message>{xml_escape(reply)}</Message></Response>"
     return PlainTextResponse(content=twiml, media_type="application/xml")
