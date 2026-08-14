@@ -718,6 +718,9 @@ def booking_calendar(year: int = None, month: int = None):
                     return;
                 }}
 
+                const urlParams = new URLSearchParams(window.location.search);
+                const fromWhatsapp = urlParams.get('from');
+
                 const res = await fetch('/bookings', {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
@@ -726,7 +729,8 @@ def booking_calendar(year: int = None, month: int = None):
                         guest_name: name,
                         guest_phone: phone,
                         check_in: selectedDate,
-                        check_out: checkout
+                        check_out: checkout,
+                        from_whatsapp: fromWhatsapp
                     }})
                 }});
 
@@ -758,26 +762,30 @@ async def whatsapp_webhook(Body: str = Form(...), From: str = Form(...)):
     try:
         if step is None:
             if msg == "1":
-                reply = f"Check availability and book here:\n{APP_BASE_URL}/search?from={From}"
+                reply = f"Check availability and book here:\n{APP_BASE_URL}/calendar?from={From}"
                 session = {"step": None, "data": {}}
             elif msg == "2":
-                session = {"step": "book_room", "data": {}}
-                reply = "Which room number would you like to book?"
-            elif msg == "3":
                 session = {"step": "cancel_id", "data": {}}
                 reply = "Enter the booking ID to cancel."
-            elif msg == "4":
+            elif msg == "3":
                 s = SessionLocal()
-                today = date_type.today()
-                count = s.query(Booking).filter(
-                    Booking.check_in <= today,
-                    Booking.check_out > today,
+                last_booking = s.query(Booking).filter(
                     Booking.status == "confirmed"
-                ).count()
+                ).order_by(Booking.id.desc()).first()
                 s.close()
-                reply = f"Total active bookings today: {count}"
+                if last_booking:
+                    reply = (
+                        f"Last booking:\n"
+                        f"Booking ID: BK{last_booking.id:04d}\n"
+                        f"Room: {last_booking.room_id}\n"
+                        f"Guest: {last_booking.guest_name} ({last_booking.guest_phone})\n"
+                        f"Dates: {last_booking.check_in} to {last_booking.check_out}"
+                    )
+                else:
+                    reply = "No bookings found yet."
+                session = {"step": None, "data": {}}
             else:
-                reply = "Choose an option:\n1. Check Availability and Book (Calendar)\n2. Book (manual entry)\n3. Cancel\n4. Total Bookings"
+                reply = "Choose an option:\n1. Check Availability and Book\n2. Cancel\n3. My Last Booking"
 
         elif step == "book_room":
             data["room_id"] = int(msg)
@@ -853,7 +861,7 @@ async def whatsapp_webhook(Body: str = Form(...), From: str = Form(...)):
 
         else:
             session = {"step": None, "data": {}}
-            reply = "Choose an option:\n1. Check Availability and Book (Calendar)\n2. Book (manual entry)\n3. Cancel\n4. Total Bookings"
+            reply = "Choose an option:\n1. Check Availability and Book\n2. Cancel\n3. My Last Booking"
 
         SESSIONS[From] = session
 
