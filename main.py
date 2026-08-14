@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from datetime import date as date_type
 import calendar
 from xml.sax.saxutils import escape as xml_escape
+from urllib.parse import quote as url_quote
 from models import SessionLocal, Booking, Room
 from conflict_check import has_conflict
 
@@ -762,7 +763,7 @@ async def whatsapp_webhook(Body: str = Form(...), From: str = Form(...)):
     try:
         if step is None:
             if msg == "1":
-                reply = f"Check availability and book here:\n{APP_BASE_URL}/calendar?from={From}"
+                reply = f"Check availability and book here:\n{APP_BASE_URL}/calendar?from={url_quote(From)}"
                 session = {"step": None, "data": {}}
             elif msg == "2":
                 session = {"step": "cancel_id", "data": {}}
