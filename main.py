@@ -1,68 +1,25 @@
+import os
+from dotenv import load_dotenv
+from twilio.rest import Client
 from fastapi import FastAPI, HTTPException, Form
 from fastapi.responses import PlainTextResponse, HTMLResponse
 from pydantic import BaseModel
-from datetime import date as date_type, timedelta
+from datetime import date as date_type
 import calendar
-import json
-import os
-from xml.sax.saxutils import escape as xml_escape
-from dotenv import load_dotenv
-from twilio.rest import Client
 from models import SessionLocal, Booking, Room
 from conflict_check import has_conflict
 
 load_dotenv()
+TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID")
+TWILIO_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
+TWILIO_FROM = os.getenv("TWILIO_WHATSAPP_NUMBER") or os.getenv("TWILIO_WHATSAPP_FROM")
+twilio_client = Client(TWILIO_SID, TWILIO_TOKEN)
 
-TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
-TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
-TWILIO_WHATSAPP_FROM = os.environ.get("TWILIO_WHATSAPP_FROM")
-CONTENT_SID_DATE_PICKER = os.environ.get("CONTENT_SID_DATE_PICKER")
-
-twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+APP_BASE_URL = os.getenv("APP_BASE_URL", "https://resort-booking-bot.onrender.com")
 
 app = FastAPI()
 
 SESSIONS = {}
-
-
-def get_date_options(days=10):
-    """Return the next `days` days with a title/description and how many rooms are free that day."""
-    session = SessionLocal()
-    all_rooms = session.query(Room).all()
-    total_rooms = len(all_rooms)
-    options = []
-    for i in range(days):
-        d = date_type.today() + timedelta(days=i)
-        bookings_that_day = session.query(Booking).filter(
-            Booking.status == "confirmed",
-            Booking.check_in <= d,
-            Booking.check_out > d
-        ).count()
-        free = total_rooms - bookings_that_day
-        title = d.strftime("%b %d")
-        desc = "Fully booked" if free <= 0 else f"{free} room{'s' if free != 1 else ''} free"
-        options.append({"date": d.isoformat(), "title": title, "description": desc})
-    session.close()
-    return options
-
-
-def send_date_picker(to_whatsapp_number, body_text="Select a check-in date:"):
-    """Sends the List Picker content template with the next 10 days as options.
-    Returns the list of options sent, so the caller can store a title->date mapping."""
-    options = get_date_options(10)
-
-    content_variables = {}
-    for idx, opt in enumerate(options):
-        content_variables[str(idx * 2 + 1)] = opt["title"]
-        content_variables[str(idx * 2 + 2)] = opt["description"]
-
-    twilio_client.messages.create(
-        content_sid=CONTENT_SID_DATE_PICKER,
-        content_variables=json.dumps(content_variables),
-        from_=TWILIO_WHATSAPP_FROM,
-        to=to_whatsapp_number
-    )
-    return options
 
 class BookingRequest(BaseModel):
     room_id: int
@@ -70,6 +27,7 @@ class BookingRequest(BaseModel):
     guest_phone: str
     check_in: date_type
     check_out: date_type
+    from_whatsapp: str | None = None
 
 
 class ModifyBookingRequest(BaseModel):
@@ -82,35 +40,27 @@ def home():
     return {"message": "Resort booking bot is running"}
 
 
-def format_whatsapp_number(phone: str) -> str:
-    """Normalize a plain phone number into Twilio's whatsapp:+<countrycode><number> format.
-    Assumes India (+91) if no country code is given."""
-    cleaned = "".join(ch for ch in phone if ch.isdigit() or ch == "+")
-    if cleaned.startswith("+"):
-        return f"whatsapp:{cleaned}"
-    if cleaned.startswith("91") and len(cleaned) > 10:
-        return f"whatsapp:+{cleaned}"
-    return f"whatsapp:+91{cleaned}"
+@app.get("/seed-rooms-once")
+def seed_rooms_once():
+    session = SessionLocal()
+    existing = session.query(Room).count()
+    if existing > 0:
+        session.close()
+        return {"message": f"Rooms already exist ({existing}), skipping."}
 
-
-def send_booking_confirmation(guest_phone: str, booking_id: int, room_id: int, check_in, check_out):
-    """Sends a WhatsApp confirmation message to the guest after a booking is created.
-    Fails silently (logs only) so a messaging failure never blocks the booking itself."""
-    try:
-        to_number = format_whatsapp_number(guest_phone)
-        body = (
-            f"Booking confirmed!\n"
-            f"Booking ID: BK{booking_id:04d}\n"
-            f"Room: {room_id}\n"
-            f"Dates: {check_in} to {check_out}"
-        )
-        twilio_client.messages.create(
-            body=body,
-            from_=TWILIO_WHATSAPP_FROM,
-            to=to_number
-        )
-    except Exception as e:
-        print("BOOKING CONFIRMATION SEND ERROR:", repr(e))
+    room_data = [
+        ("101", "Standard"),
+        ("102", "Standard"),
+        ("103", "Deluxe"),
+        ("104", "Deluxe"),
+        ("105", "Suite"),
+        ("106", "Suite"),
+    ]
+    for number, room_type in room_data:
+        session.add(Room(room_number=number, room_type=room_type))
+    session.commit()
+    session.close()
+    return {"message": "6 rooms added successfully."}
 
 
 @app.post("/bookings")
@@ -132,9 +82,15 @@ def create_booking(booking: BookingRequest):
     session.refresh(new_booking)
     session.close()
 
-    send_booking_confirmation(
-        booking.guest_phone, new_booking.id, booking.room_id, booking.check_in, booking.check_out
-    )
+    if booking.from_whatsapp:
+        try:
+            twilio_client.messages.create(
+                from_=TWILIO_FROM,
+                to=booking.from_whatsapp,
+                body=f"Booking confirmed via calendar.\nBooking ID: BK{new_booking.id:04d}\nRoom {booking.room_id}, {booking.check_in} to {booking.check_out}"
+            )
+        except Exception as e:
+            print("Failed to send WhatsApp confirmation:", e)
 
     return {"message": "Booking confirmed", "booking_id": new_booking.id}
 
@@ -258,8 +214,7 @@ def day_details(date: date_type):
         "booked_count": len(booked_list),
         "available_count": len(all_rooms) - len(booked_list),
         "bookings": booked_list,
-        "available_rooms": available_rooms,
-        "is_past": date < date_type.today()
+        "available_rooms": available_rooms
     }
 
 
@@ -281,12 +236,12 @@ def rooms_availability(check_in: date_type, check_out: date_type):
     }
 
 
-@app.get("/check-availability", response_class=HTMLResponse)
-def availability_page():
+@app.get("/search", response_class=HTMLResponse)
+def search_page():
     html = """
     <html>
     <head>
-        <title>Check Availability</title>
+        <title>Search & Book</title>
         <style>
             body {
                 font-family: 'Segoe UI', Arial, sans-serif;
@@ -348,56 +303,91 @@ def availability_page():
                 margin-bottom: 8px;
                 font-size: 14px;
             }
-            .room-free { background: #dcf5e0; }
-            .room-booked { background: #fbdada; color: #7a2c2c; }
+            .room-available {
+                background: #dcf5e0;
+                cursor: pointer;
+                transition: background 0.15s ease;
+            }
+            .room-available:hover { background: #b8ecc2; }
+            .room-booked {
+                background: #fbdada;
+                color: #7a2c2c;
+            }
             .badge {
                 font-size: 12px;
                 padding: 3px 10px;
                 border-radius: 20px;
                 background: white;
             }
+            .book-form {
+                margin-top: 18px;
+                padding: 16px;
+                border-radius: 10px;
+                background: #f4f6f8;
+                display: none;
+            }
+            .book-form input {
+                margin-bottom: 10px;
+            }
             .msg { margin-top: 10px; font-size: 14px; font-weight: bold; }
+            .success-card {
+                background: #dcf5e0;
+                border-radius: 10px;
+                padding: 16px;
+                margin-top: 14px;
+                display: none;
+            }
+            .success-card h3 { margin: 0 0 8px 0; color: #1a5c2a; }
             .back-link { text-align:center; margin-top:16px; }
             .back-link a { color:#222; font-size:13px; }
         </style>
     </head>
     <body>
         <div class="card">
-            <h2>Check Availability</h2>
+            <h2>Check Availability & Book</h2>
 
             <div class="date-row">
                 <div class="date-field">
                     <label>Check-in</label>
-                    <input type="date" id="checkin" min="">
+                    <input type="date" id="checkin">
                 </div>
                 <div class="date-field">
                     <label>Check-out</label>
-                    <input type="date" id="checkout" min="">
+                    <input type="date" id="checkout">
                 </div>
             </div>
             <button onclick="searchRooms()">Check Availability</button>
 
             <div class="results" id="results"></div>
 
-            <div class="back-link"><a href="/book">&rarr; Go to Book a Room</a></div>
+            <div class="book-form" id="bookForm">
+                <div style="margin-bottom:10px; font-size:14px;">
+                    Booking <b id="roomLabel"></b>
+                </div>
+                <input type="text" id="guestName" placeholder="Guest name">
+                <input type="text" id="guestPhone" placeholder="Phone number">
+                <button onclick="confirmBooking()">Confirm Booking</button>
+                <div class="msg" id="bookMsg"></div>
+            </div>
+
+            <div class="success-card" id="successCard"></div>
+
+            <div class="back-link"><a href="/calendar">&larr; Back to calendar</a></div>
         </div>
 
         <script>
-            const todayStr = new Date().toISOString().split('T')[0];
-            document.getElementById('checkin').setAttribute('min', todayStr);
-            document.getElementById('checkout').setAttribute('min', todayStr);
+            let selectedRoom = null;
+            let bookingCheckin, bookingCheckout;
 
             async function searchRooms() {
                 const checkin = document.getElementById('checkin').value;
                 const checkout = document.getElementById('checkout').value;
                 const results = document.getElementById('results');
+                document.getElementById('bookForm').style.display = 'none';
+                document.getElementById('successCard').style.display = 'none';
 
                 if (!checkin || !checkout) {
                     results.innerHTML = "<div class='msg' style='color:red;'>Please select both dates.</div>";
-                    return;
-                }
-                if (checkin < todayStr) {
-                    results.innerHTML = "<div class='msg' style='color:#7a2c2c;'>This date has already passed. Please choose a future date.</div>";
                     return;
                 }
                 if (checkout <= checkin) {
@@ -414,8 +404,8 @@ def availability_page():
 
                 data.rooms.forEach(r => {
                     if (r.available) {
-                        html += "<div class='room-card room-free'>Room " + r.room_id +
-                            "<span class='badge'>Available</span></div>";
+                        html += "<div class='room-card room-available' onclick='selectRoom(" + r.room_id + ", \\"" + checkin + "\\", \\"" + checkout + "\\")'>" +
+                            "Room " + r.room_id + "<span class='badge'>Available — tap to book</span></div>";
                     } else {
                         html += "<div class='room-card room-booked'>Room " + r.room_id +
                             "<span class='badge'>Booked</span></div>";
@@ -424,179 +414,54 @@ def availability_page():
 
                 results.innerHTML = html;
             }
-        </script>
-    </body>
-    </html>
-    """
-    return html
 
-
-@app.get("/book", response_class=HTMLResponse)
-def book_page():
-    html = """
-    <html>
-    <head>
-        <title>Book a Room</title>
-        <style>
-            body {
-                font-family: 'Segoe UI', Arial, sans-serif;
-                background: #f4f6f8;
-                margin: 0;
-                padding: 30px;
-                display: flex;
-                justify-content: center;
+            function selectRoom(roomId, checkin, checkout) {
+                selectedRoom = roomId;
+                bookingCheckin = checkin;
+                bookingCheckout = checkout;
+                document.getElementById('roomLabel').innerText =
+                    "Room " + roomId + " (" + checkin + " to " + checkout + ")";
+                document.getElementById('bookForm').style.display = 'block';
+                document.getElementById('bookMsg').innerText = '';
             }
-            .card {
-                background: white;
-                border-radius: 16px;
-                box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-                padding: 28px;
-                max-width: 480px;
-                width: 100%;
-            }
-            h2 { text-align: center; margin-top: 0; }
-            .date-row {
-                display: flex;
-                gap: 12px;
-                margin-bottom: 16px;
-            }
-            .date-field { flex: 1; }
-            label {
-                display: block;
-                font-size: 13px;
-                color: #666;
-                margin-bottom: 4px;
-            }
-            input, select {
-                width: 100%;
-                padding: 10px;
-                border-radius: 8px;
-                border: 1px solid #ccc;
-                box-sizing: border-box;
-                font-size: 14px;
-                margin-bottom: 12px;
-            }
-            button {
-                width: 100%;
-                padding: 12px;
-                background: #222;
-                color: white;
-                border: none;
-                border-radius: 8px;
-                font-weight: bold;
-                cursor: pointer;
-                font-size: 15px;
-                margin-top: 6px;
-            }
-            button:hover { background: #000; }
-            .msg { margin-top: 10px; font-size: 14px; font-weight: bold; }
-            .success-card {
-                background: #dcf5e0;
-                border-radius: 10px;
-                padding: 16px;
-                margin-top: 14px;
-                display: none;
-            }
-            .success-card h3 { margin: 0 0 8px 0; color: #1a5c2a; }
-            .back-link { text-align:center; margin-top:16px; }
-            .back-link a { color:#222; font-size:13px; }
-        </style>
-    </head>
-    <body>
-        <div class="card">
-            <h2>Book a Room</h2>
-
-            <label>Room</label>
-            <select id="roomId">
-                <option value="1">Room 1</option>
-                <option value="2">Room 2</option>
-                <option value="3">Room 3</option>
-                <option value="4">Room 4</option>
-                <option value="5">Room 5</option>
-                <option value="6">Room 6</option>
-            </select>
-
-            <div class="date-row">
-                <div class="date-field">
-                    <label>Check-in</label>
-                    <input type="date" id="checkin" min="">
-                </div>
-                <div class="date-field">
-                    <label>Check-out</label>
-                    <input type="date" id="checkout" min="">
-                </div>
-            </div>
-
-            <label>Guest name</label>
-            <input type="text" id="guestName" placeholder="Guest name">
-
-            <label>Phone number</label>
-            <input type="text" id="guestPhone" placeholder="Phone number">
-
-            <button onclick="confirmBooking()">Confirm Booking</button>
-            <div class="msg" id="bookMsg"></div>
-
-            <div class="success-card" id="successCard"></div>
-
-            <div class="back-link"><a href="/check-availability">&larr; Check Availability first</a></div>
-        </div>
-
-        <script>
-            const todayStr = new Date().toISOString().split('T')[0];
-            document.getElementById('checkin').setAttribute('min', todayStr);
-            document.getElementById('checkout').setAttribute('min', todayStr);
 
             async function confirmBooking() {
-                const roomId = parseInt(document.getElementById('roomId').value);
-                const checkin = document.getElementById('checkin').value;
-                const checkout = document.getElementById('checkout').value;
                 const name = document.getElementById('guestName').value.trim();
                 const phone = document.getElementById('guestPhone').value.trim();
                 const msgBox = document.getElementById('bookMsg');
-                msgBox.innerText = '';
 
-                if (!checkin || !checkout) {
-                    msgBox.style.color = 'red';
-                    msgBox.innerText = 'Please select check-in and check-out dates.';
-                    return;
-                }
-                if (checkin < todayStr) {
-                    msgBox.style.color = '#7a2c2c';
-                    msgBox.innerText = 'This date has already passed. Please choose a future date.';
-                    return;
-                }
-                if (checkout <= checkin) {
-                    msgBox.style.color = 'red';
-                    msgBox.innerText = 'Check-out must be after check-in.';
-                    return;
-                }
                 if (!name || !phone) {
                     msgBox.style.color = 'red';
                     msgBox.innerText = 'Please enter guest name and phone.';
                     return;
                 }
 
+                const urlParams = new URLSearchParams(window.location.search);
+                const fromWhatsapp = urlParams.get('from');
+
                 const res = await fetch('/bookings', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        room_id: roomId,
+                        room_id: selectedRoom,
                         guest_name: name,
                         guest_phone: phone,
-                        check_in: checkin,
-                        check_out: checkout
+                        check_in: bookingCheckin,
+                        check_out: bookingCheckout,
+                        from_whatsapp: fromWhatsapp
                     })
                 });
 
                 if (res.status === 200) {
                     const data = await res.json();
+                    document.getElementById('bookForm').style.display = 'none';
                     const successCard = document.getElementById('successCard');
                     successCard.style.display = 'block';
                     successCard.innerHTML =
                         "<h3>Booking Created Successfully</h3>" +
                         "Booking ID: <b>BK" + String(data.booking_id).padStart(4, '0') + "</b><br>" +
-                        "Room: " + roomId + "<br>" +
-                        "Dates: " + checkin + " to " + checkout;
+                        "Room: " + selectedRoom + "<br>" +
+                        "Dates: " + bookingCheckin + " to " + bookingCheckout;
                 } else {
                     const err = await res.json();
                     msgBox.style.color = 'red';
@@ -608,8 +473,6 @@ def book_page():
     </html>
     """
     return html
-
-
 
 
 @app.get("/calendar", response_class=HTMLResponse)
@@ -749,7 +612,7 @@ def booking_calendar(year: int = None, month: int = None):
                 <h2>{month_name} {year}</h2>
                 <a href="/calendar?year={next_year}&month={next_month}">Next &rarr;</a>
             </div>
-            <div class="search-link"><a href="/check-availability">&rarr; Check Availability</a> &nbsp;|&nbsp; <a href="/book">Book a Room</a></div>
+            <div class="search-link"><a href="/search">&rarr; Search & Book by dates</a></div>
             <table>
                 <tr><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th><th>Sun</th></tr>
                 {rows}
@@ -784,32 +647,22 @@ def booking_calendar(year: int = None, month: int = None):
                 }}
 
                 if (data.available_rooms.length > 0) {{
-                    if (data.is_past) {{
-                        html += "<div style='margin-top:10px;'><b>Rooms not booked that day:</b></div>";
-                        data.available_rooms.forEach(r => {{
-                            html += "<div class='room-row' style='background:#eee; color:#888;'>Room " + r + "</div>";
-                        }});
-                        html += "<div style='margin-top:8px; font-size:12px; color:#999;'>This date has already passed — booking is disabled.</div>";
-                    }} else {{
-                        html += "<div style='margin-top:10px;'><b>Available rooms (click to book):</b></div>";
-                        data.available_rooms.forEach(r => {{
-                            html += "<div class='room-row room-available' onclick='openBookForm(" + r + ")'>Room " + r + "</div>";
-                        }});
-                    }}
+                    html += "<div style='margin-top:10px;'><b>Available rooms (click to book):</b></div>";
+                    data.available_rooms.forEach(r => {{
+                        html += "<div class='room-row room-available' onclick='openBookForm(" + r + ")'>Room " + r + "</div>";
+                    }});
                 }}
 
-                if (!data.is_past) {{
-                    html += `
-                        <div class="book-form" id="bookForm">
-                            <div style="margin-bottom:8px; font-size:13px;">Booking <b id="bookRoomLabel"></b></div>
-                            <input type="date" id="checkoutInput" />
-                            <input type="text" id="nameInput" placeholder="Guest name" />
-                            <input type="text" id="phoneInput" placeholder="Phone number" />
-                            <button onclick="submitBooking()">Confirm Booking</button>
-                            <div class="book-msg" id="bookMsg"></div>
-                        </div>
-                    `;
-                }}
+                html += `
+                    <div class="book-form" id="bookForm">
+                        <div style="margin-bottom:8px; font-size:13px;">Booking <b id="bookRoomLabel"></b></div>
+                        <input type="date" id="checkoutInput" />
+                        <input type="text" id="nameInput" placeholder="Guest name" />
+                        <input type="text" id="phoneInput" placeholder="Phone number" />
+                        <button onclick="submitBooking()">Confirm Booking</button>
+                        <div class="book-msg" id="bookMsg"></div>
+                    </div>
+                `;
 
                 panel.innerHTML = html;
             }}
@@ -873,90 +726,36 @@ async def whatsapp_webhook(Body: str = Form(...), From: str = Form(...)):
     try:
         if step is None:
             if msg == "1":
-                reply = "Check availability and book a room here:\nhttps://fiction-attribute-limping.ngrok-free.dev/calendar"
+                reply = f"Check availability and book here:\n{APP_BASE_URL}/search?from={From}"
                 session = {"step": None, "data": {}}
             elif msg == "2":
+                session = {"step": "book_room", "data": {}}
+                reply = "Which room number would you like to book?"
+            elif msg == "3":
                 session = {"step": "cancel_id", "data": {}}
                 reply = "Enter the booking ID to cancel."
-            elif msg == "3":
+            elif msg == "4":
                 s = SessionLocal()
-                last_booking = s.query(Booking).filter(
+                today = date_type.today()
+                count = s.query(Booking).filter(
+                    Booking.check_in <= today,
+                    Booking.check_out > today,
                     Booking.status == "confirmed"
-                ).order_by(Booking.id.desc()).first()
+                ).count()
                 s.close()
-                if last_booking:
-                    reply = (
-                        f"Last booking:\n"
-                        f"Booking ID: BK{last_booking.id:04d}\n"
-                        f"Room: {last_booking.room_id}\n"
-                        f"Guest: {last_booking.guest_name} ({last_booking.guest_phone})\n"
-                        f"Dates: {last_booking.check_in} to {last_booking.check_out}"
-                    )
-                else:
-                    reply = "No bookings found yet."
-                session = {"step": None, "data": {}}
+                reply = f"Total active bookings today: {count}"
             else:
-                reply = "Choose an option:\n1. Check Availability and Book\n2. Cancel\n3. My Last Booking"
-
-        elif step == "avail_room":
-            data["room_id"] = int(msg)
-            options = send_date_picker(From, "Select a check-in date:")
-            data["date_options"] = {opt["title"]: opt["date"] for opt in options}
-            session = {"step": "avail_pick_checkin", "data": data}
-            reply = ""
-
-        elif step == "avail_pick_checkin":
-            date_iso = data.get("date_options", {}).get(msg.strip())
-            if not date_iso:
-                reply = "Please tap one of the dates from the list above."
-                session = {"step": "avail_pick_checkin", "data": data}
-            else:
-                data["check_in"] = date_type.fromisoformat(date_iso)
-                data.pop("date_options", None)
-                session = {"step": "avail_checkout", "data": data}
-                reply = "Check-out date? (YYYY-MM-DD)"
-
-        elif step == "avail_checkout":
-            check_out = date_type.fromisoformat(msg)
-            if check_out <= data["check_in"]:
-                reply = "Check-out date must be after check-in date. Check-out date? (YYYY-MM-DD)"
-                session = {"step": "avail_checkout", "data": data}
-            else:
-                data["check_out"] = check_out
-                conflict = has_conflict(data["room_id"], data["check_in"], data["check_out"])
-                available = not conflict
-                reply = f"Room {data['room_id']} is {'available' if available else 'NOT available'} for {data['check_in']} to {data['check_out']}."
-                if available:
-                    reply += "\n\nType 2 to book this exact room and dates."
-                    session = {
-                        "step": None,
-                        "data": {
-                            "last_room": data["room_id"],
-                            "last_checkin": data["check_in"],
-                            "last_checkout": data["check_out"],
-                            "last_available": True
-                        }
-                    }
-                else:
-                    session = {"step": None, "data": {}}
+                reply = "Choose an option:\n1. Check Availability & Book (Calendar)\n2. Book (manual entry)\n3. Cancel\n4. Total Bookings"
 
         elif step == "book_room":
             data["room_id"] = int(msg)
-            options = send_date_picker(From, "Select a check-in date:")
-            data["date_options"] = {opt["title"]: opt["date"] for opt in options}
-            session = {"step": "book_pick_checkin", "data": data}
-            reply = ""
+            session = {"step": "book_checkin", "data": data}
+            reply = "Check-in date? (YYYY-MM-DD)"
 
-        elif step == "book_pick_checkin":
-            date_iso = data.get("date_options", {}).get(msg.strip())
-            if not date_iso:
-                reply = "Please tap one of the dates from the list above."
-                session = {"step": "book_pick_checkin", "data": data}
-            else:
-                data["check_in"] = date_type.fromisoformat(date_iso)
-                data.pop("date_options", None)
-                session = {"step": "book_checkout", "data": data}
-                reply = "Check-out date? (YYYY-MM-DD)"
+        elif step == "book_checkin":
+            data["check_in"] = date_type.fromisoformat(msg)
+            session = {"step": "book_checkout", "data": data}
+            reply = "Check-out date? (YYYY-MM-DD)"
 
         elif step == "book_checkout":
             check_out = date_type.fromisoformat(msg)
@@ -972,9 +771,9 @@ async def whatsapp_webhook(Body: str = Form(...), From: str = Form(...)):
             name_part, phone_part = msg.split(",")
             guest_name = name_part.strip()
             guest_phone = phone_part.strip()
-            room_id = data.get("room_id") or data.get("last_room")
-            check_in = data.get("check_in") or data.get("last_checkin")
-            check_out = data.get("check_out") or data.get("last_checkout")
+            room_id = data.get("room_id")
+            check_in = data.get("check_in")
+            check_out = data.get("check_out")
 
             if has_conflict(room_id, check_in, check_out):
                 reply = f"Room {room_id} was just booked by someone else. Booking rejected."
@@ -999,7 +798,7 @@ async def whatsapp_webhook(Body: str = Form(...), From: str = Form(...)):
                 reply = "Invalid booking ID. Please enter a numeric booking ID (e.g. 12 or BK0012)."
                 session = {"step": None, "data": {}}
                 SESSIONS[From] = session
-                twiml = f"<Response><Message>{xml_escape(reply)}</Message></Response>"
+                twiml = f"<Response><Message>{reply}</Message></Response>"
                 return PlainTextResponse(content=twiml, media_type="application/xml")
 
             s = SessionLocal()
@@ -1017,7 +816,7 @@ async def whatsapp_webhook(Body: str = Form(...), From: str = Form(...)):
 
         else:
             session = {"step": None, "data": {}}
-            reply = "Choose an option:\n1. Check Availability and Book\n2. Cancel\n3. My Last Booking"
+            reply = "Choose an option:\n1. Check Availability & Book (Calendar)\n2. Book (manual entry)\n3. Cancel\n4. Total Bookings"
 
         SESSIONS[From] = session
 
@@ -1026,8 +825,5 @@ async def whatsapp_webhook(Body: str = Form(...), From: str = Form(...)):
         reply = "Sorry, something went wrong. Type anything to see the menu again."
         SESSIONS[From] = {"step": None, "data": {}}
 
-    if reply:
-        twiml = f"<Response><Message>{xml_escape(reply)}</Message></Response>"
-    else:
-        twiml = "<Response></Response>"
+    twiml = f"<Response><Message>{reply}</Message></Response>"
     return PlainTextResponse(content=twiml, media_type="application/xml")
