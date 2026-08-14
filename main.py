@@ -65,6 +65,19 @@ def seed_rooms_once():
     return {"message": "6 rooms added successfully."}
 
 
+def format_whatsapp_number(phone: str) -> str:
+    """Normalize a plain phone number into Twilio's whatsapp:+<countrycode><number> format.
+    Assumes India (+91) if no country code is given. Leaves already-formatted whatsapp: numbers untouched."""
+    if phone.startswith("whatsapp:"):
+        return phone
+    cleaned = "".join(ch for ch in phone if ch.isdigit() or ch == "+")
+    if cleaned.startswith("+"):
+        return f"whatsapp:{cleaned}"
+    if cleaned.startswith("91") and len(cleaned) > 10:
+        return f"whatsapp:+{cleaned}"
+    return f"whatsapp:+91{cleaned}"
+
+
 @app.post("/bookings")
 def create_booking(booking: BookingRequest):
     if booking.check_in < date_type.today():
@@ -87,15 +100,18 @@ def create_booking(booking: BookingRequest):
     session.refresh(new_booking)
     session.close()
 
-    if booking.from_whatsapp:
-        try:
-            twilio_client.messages.create(
-                from_=TWILIO_FROM,
-                to=booking.from_whatsapp,
-                body=f"Booking confirmed via calendar.\nBooking ID: BK{new_booking.id:04d}\nRoom {booking.room_id}, {booking.check_in} to {booking.check_out}"
-            )
-        except Exception as e:
-            print("Failed to send WhatsApp confirmation:", e)
+    # Always try to notify the guest's own phone number, regardless of how the booking page was reached.
+    # If a from_whatsapp value was passed (i.e. booked via a WhatsApp-generated link), that's used instead,
+    # since it's already in the exact verified format WhatsApp sent us.
+    notify_number = booking.from_whatsapp or format_whatsapp_number(booking.guest_phone)
+    try:
+        twilio_client.messages.create(
+            from_=TWILIO_FROM,
+            to=notify_number,
+            body=f"Booking confirmed!\nBooking ID: BK{new_booking.id:04d}\nRoom {booking.room_id}, {booking.check_in} to {booking.check_out}"
+        )
+    except Exception as e:
+        print("Failed to send WhatsApp confirmation:", e)
 
     return {"message": "Booking confirmed", "booking_id": new_booking.id}
 
