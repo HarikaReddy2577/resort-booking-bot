@@ -65,6 +65,9 @@ def seed_rooms_once():
 
 @app.post("/bookings")
 def create_booking(booking: BookingRequest):
+    if booking.check_in < date_type.today():
+        raise HTTPException(status_code=400, detail="Check-in date cannot be in the past")
+
     if has_conflict(booking.room_id, booking.check_in, booking.check_out):
         raise HTTPException(status_code=409, detail="Room already booked for these dates")
 
@@ -193,6 +196,17 @@ def departures_today():
 
 @app.get("/day-details")
 def day_details(date: date_type):
+    if date < date_type.today():
+        return {
+            "date": str(date),
+            "total_rooms": 0,
+            "booked_count": 0,
+            "available_count": 0,
+            "bookings": [],
+            "available_rooms": [],
+            "error": "This date is in the past."
+        }
+
     session = SessionLocal()
     all_rooms = session.query(Room).all()
     bookings = session.query(Booking).filter(
@@ -238,49 +252,50 @@ def rooms_availability(check_in: date_type, check_out: date_type):
 
 @app.get("/search", response_class=HTMLResponse)
 def search_page():
-    html = """
+    today_str = date_type.today().isoformat()
+    html = f"""
     <html>
     <head>
         <title>Search & Book</title>
         <style>
-            body {
+            body {{
                 font-family: 'Segoe UI', Arial, sans-serif;
                 background: #f4f6f8;
                 margin: 0;
                 padding: 30px;
                 display: flex;
                 justify-content: center;
-            }
-            .card {
+            }}
+            .card {{
                 background: white;
                 border-radius: 16px;
                 box-shadow: 0 4px 20px rgba(0,0,0,0.08);
                 padding: 28px;
                 max-width: 480px;
                 width: 100%;
-            }
-            h2 { text-align: center; margin-top: 0; }
-            .date-row {
+            }}
+            h2 {{ text-align: center; margin-top: 0; }}
+            .date-row {{
                 display: flex;
                 gap: 12px;
                 margin-bottom: 16px;
-            }
-            .date-field { flex: 1; }
-            label {
+            }}
+            .date-field {{ flex: 1; }}
+            label {{
                 display: block;
                 font-size: 13px;
                 color: #666;
                 margin-bottom: 4px;
-            }
-            input {
+            }}
+            input {{
                 width: 100%;
                 padding: 10px;
                 border-radius: 8px;
                 border: 1px solid #ccc;
                 box-sizing: border-box;
                 font-size: 14px;
-            }
-            button {
+            }}
+            button {{
                 width: 100%;
                 padding: 12px;
                 background: #222;
@@ -291,10 +306,10 @@ def search_page():
                 cursor: pointer;
                 font-size: 15px;
                 margin-top: 6px;
-            }
-            button:hover { background: #000; }
-            .results { margin-top: 24px; }
-            .room-card {
+            }}
+            button:hover {{ background: #000; }}
+            .results {{ margin-top: 24px; }}
+            .room-card {{
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
@@ -302,44 +317,44 @@ def search_page():
                 border-radius: 10px;
                 margin-bottom: 8px;
                 font-size: 14px;
-            }
-            .room-available {
+            }}
+            .room-available {{
                 background: #dcf5e0;
                 cursor: pointer;
                 transition: background 0.15s ease;
-            }
-            .room-available:hover { background: #b8ecc2; }
-            .room-booked {
+            }}
+            .room-available:hover {{ background: #b8ecc2; }}
+            .room-booked {{
                 background: #fbdada;
                 color: #7a2c2c;
-            }
-            .badge {
+            }}
+            .badge {{
                 font-size: 12px;
                 padding: 3px 10px;
                 border-radius: 20px;
                 background: white;
-            }
-            .book-form {
+            }}
+            .book-form {{
                 margin-top: 18px;
                 padding: 16px;
                 border-radius: 10px;
                 background: #f4f6f8;
                 display: none;
-            }
-            .book-form input {
+            }}
+            .book-form input {{
                 margin-bottom: 10px;
-            }
-            .msg { margin-top: 10px; font-size: 14px; font-weight: bold; }
-            .success-card {
+            }}
+            .msg {{ margin-top: 10px; font-size: 14px; font-weight: bold; }}
+            .success-card {{
                 background: #dcf5e0;
                 border-radius: 10px;
                 padding: 16px;
                 margin-top: 14px;
                 display: none;
-            }
-            .success-card h3 { margin: 0 0 8px 0; color: #1a5c2a; }
-            .back-link { text-align:center; margin-top:16px; }
-            .back-link a { color:#222; font-size:13px; }
+            }}
+            .success-card h3 {{ margin: 0 0 8px 0; color: #1a5c2a; }}
+            .back-link {{ text-align:center; margin-top:16px; }}
+            .back-link a {{ color:#222; font-size:13px; }}
         </style>
     </head>
     <body>
@@ -349,11 +364,11 @@ def search_page():
             <div class="date-row">
                 <div class="date-field">
                     <label>Check-in</label>
-                    <input type="date" id="checkin">
+                    <input type="date" id="checkin" min="{today_str}">
                 </div>
                 <div class="date-field">
                     <label>Check-out</label>
-                    <input type="date" id="checkout">
+                    <input type="date" id="checkout" min="{today_str}">
                 </div>
             </div>
             <button onclick="searchRooms()">Check Availability</button>
@@ -379,21 +394,25 @@ def search_page():
             let selectedRoom = null;
             let bookingCheckin, bookingCheckout;
 
-            async function searchRooms() {
+            document.getElementById('checkin').addEventListener('change', function() {{
+                document.getElementById('checkout').min = this.value;
+            }});
+
+            async function searchRooms() {{
                 const checkin = document.getElementById('checkin').value;
                 const checkout = document.getElementById('checkout').value;
                 const results = document.getElementById('results');
                 document.getElementById('bookForm').style.display = 'none';
                 document.getElementById('successCard').style.display = 'none';
 
-                if (!checkin || !checkout) {
+                if (!checkin || !checkout) {{
                     results.innerHTML = "<div class='msg' style='color:red;'>Please select both dates.</div>";
                     return;
-                }
-                if (checkout <= checkin) {
+                }}
+                if (checkout <= checkin) {{
                     results.innerHTML = "<div class='msg' style='color:red;'>Check-out must be after check-in.</div>";
                     return;
-                }
+                }}
 
                 results.innerHTML = "Checking...";
                 const res = await fetch('/rooms-availability?check_in=' + checkin + '&check_out=' + checkout);
@@ -402,20 +421,20 @@ def search_page():
                 let html = "<div style='margin-bottom:10px; font-size:14px; color:#666;'>" +
                     checkin + " to " + checkout + "</div>";
 
-                data.rooms.forEach(r => {
-                    if (r.available) {
+                data.rooms.forEach(r => {{
+                    if (r.available) {{
                         html += "<div class='room-card room-available' onclick='selectRoom(" + r.room_id + ", \\"" + checkin + "\\", \\"" + checkout + "\\")'>" +
                             "Room " + r.room_id + "<span class='badge'>Available — tap to book</span></div>";
-                    } else {
+                    }} else {{
                         html += "<div class='room-card room-booked'>Room " + r.room_id +
                             "<span class='badge'>Booked</span></div>";
-                    }
-                });
+                    }}
+                }});
 
                 results.innerHTML = html;
-            }
+            }}
 
-            function selectRoom(roomId, checkin, checkout) {
+            function selectRoom(roomId, checkin, checkout) {{
                 selectedRoom = roomId;
                 bookingCheckin = checkin;
                 bookingCheckout = checkout;
@@ -423,36 +442,36 @@ def search_page():
                     "Room " + roomId + " (" + checkin + " to " + checkout + ")";
                 document.getElementById('bookForm').style.display = 'block';
                 document.getElementById('bookMsg').innerText = '';
-            }
+            }}
 
-            async function confirmBooking() {
+            async function confirmBooking() {{
                 const name = document.getElementById('guestName').value.trim();
                 const phone = document.getElementById('guestPhone').value.trim();
                 const msgBox = document.getElementById('bookMsg');
 
-                if (!name || !phone) {
+                if (!name || !phone) {{
                     msgBox.style.color = 'red';
                     msgBox.innerText = 'Please enter guest name and phone.';
                     return;
-                }
+                }}
 
                 const urlParams = new URLSearchParams(window.location.search);
                 const fromWhatsapp = urlParams.get('from');
 
-                const res = await fetch('/bookings', {
+                const res = await fetch('/bookings', {{
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{
                         room_id: selectedRoom,
                         guest_name: name,
                         guest_phone: phone,
                         check_in: bookingCheckin,
                         check_out: bookingCheckout,
                         from_whatsapp: fromWhatsapp
-                    })
-                });
+                    }})
+                }});
 
-                if (res.status === 200) {
+                if (res.status === 200) {{
                     const data = await res.json();
                     document.getElementById('bookForm').style.display = 'none';
                     const successCard = document.getElementById('successCard');
@@ -462,12 +481,12 @@ def search_page():
                         "Booking ID: <b>BK" + String(data.booking_id).padStart(4, '0') + "</b><br>" +
                         "Room: " + selectedRoom + "<br>" +
                         "Dates: " + bookingCheckin + " to " + bookingCheckout;
-                } else {
+                }} else {{
                     const err = await res.json();
                     msgBox.style.color = 'red';
                     msgBox.innerText = err.detail || 'Booking failed.';
-                }
-            }
+                }}
+            }}
         </script>
     </body>
     </html>
@@ -508,20 +527,30 @@ def booking_calendar(year: int = None, month: int = None):
             if day == 0:
                 rows += "<td class='empty'></td>"
             else:
-                count = day_counts.get(day, 0)
-                if count == 0:
-                    css_class = "free"
-                elif count < 6:
-                    css_class = "partial"
-                else:
-                    css_class = "full"
                 date_str = f"{year:04d}-{month:02d}-{day:02d}"
-                rows += f"""
-                <td class='{css_class}' onclick="showDetails('{date_str}')">
-                    <div class='day-num'>{day}</div>
-                    <div class='count'>{count} booked</div>
-                </td>
-                """
+                this_date = date_type(year, month, day)
+
+                if this_date < today:
+                    rows += f"""
+                    <td class='past'>
+                        <div class='day-num'>{day}</div>
+                        <div class='count'>Past</div>
+                    </td>
+                    """
+                else:
+                    count = day_counts.get(day, 0)
+                    if count == 0:
+                        css_class = "free"
+                    elif count < 6:
+                        css_class = "partial"
+                    else:
+                        css_class = "full"
+                    rows += f"""
+                    <td class='{css_class}' onclick="showDetails('{date_str}')">
+                        <div class='day-num'>{day}</div>
+                        <div class='count'>{count} booked</div>
+                    </td>
+                    """
         rows += "</tr>"
 
     html = f"""
@@ -569,6 +598,8 @@ def booking_calendar(year: int = None, month: int = None):
             .free {{ background: #dcf5e0; }}
             .partial {{ background: #fdeecb; }}
             .full {{ background: #fbdada; }}
+            .past {{ background: #eee; color: #aaa; cursor: default; }}
+            .past:hover {{ transform: none; }}
 
             .panel {{
                 background: white; border-radius: 16px;
@@ -753,9 +784,14 @@ async def whatsapp_webhook(Body: str = Form(...), From: str = Form(...)):
             reply = "Check-in date? (YYYY-MM-DD)"
 
         elif step == "book_checkin":
-            data["check_in"] = date_type.fromisoformat(msg)
-            session = {"step": "book_checkout", "data": data}
-            reply = "Check-out date? (YYYY-MM-DD)"
+            check_in = date_type.fromisoformat(msg)
+            if check_in < date_type.today():
+                reply = "Check-in date cannot be in the past. Check-in date? (YYYY-MM-DD)"
+                session = {"step": "book_checkin", "data": data}
+            else:
+                data["check_in"] = check_in
+                session = {"step": "book_checkout", "data": data}
+                reply = "Check-out date? (YYYY-MM-DD)"
 
         elif step == "book_checkout":
             check_out = date_type.fromisoformat(msg)
