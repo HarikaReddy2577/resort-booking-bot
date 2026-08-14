@@ -742,6 +742,7 @@ def booking_calendar(year: int = None, month: int = None):
                 html += `
                     <div class="book-form" id="bookForm">
                         <div style="margin-bottom:8px; font-size:13px;">Booking <b id="bookRoomLabel"></b></div>
+                        <label style="display:block; font-size:12px; color:#666; margin-bottom:4px;">Check-out date</label>
                         <input type="date" id="checkoutInput" />
                         <input type="text" id="nameInput" placeholder="Guest name" />
                         <input type="text" id="phoneInput" placeholder="Phone number" />
