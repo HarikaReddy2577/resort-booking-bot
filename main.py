@@ -274,8 +274,11 @@ def search_page():
     html = f"""
     <html>
     <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>Search & Book</title>
         <style>
+            * {{ box-sizing: border-box; }}
+            html, body {{ max-width: 100%; overflow-x: hidden; }}
             body {{
                 font-family: 'Segoe UI', Arial, sans-serif;
                 background: #f4f6f8;
@@ -373,6 +376,14 @@ def search_page():
             .success-card h3 {{ margin: 0 0 8px 0; color: #1a5c2a; }}
             .back-link {{ text-align:center; margin-top:16px; }}
             .back-link a {{ color:#222; font-size:13px; }}
+
+            @media (max-width: 480px) {{
+                body {{ padding: 14px; }}
+                .card {{ padding: 16px; border-radius: 12px; }}
+                h2 {{ font-size: 18px; }}
+                .room-card {{ font-size: 13px; padding: 10px; }}
+                .badge {{ font-size: 11px; padding: 2px 8px; }}
+            }}
         </style>
     </head>
     <body>
@@ -574,8 +585,11 @@ def booking_calendar(year: int = None, month: int = None):
     html = f"""
     <html>
     <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>Booking Calendar</title>
         <style>
+            * {{ box-sizing: border-box; }}
+            html, body {{ max-width: 100%; overflow-x: hidden; }}
             body {{
                 font-family: 'Segoe UI', Arial, sans-serif;
                 background: #f4f6f8;
@@ -592,6 +606,7 @@ def booking_calendar(year: int = None, month: int = None):
                 box-shadow: 0 4px 20px rgba(0,0,0,0.08);
                 padding: 24px;
                 max-width: 700px;
+                width: 100%;
                 flex: 1;
             }}
             h2 {{ text-align: center; color: #222; margin-bottom: 4px; }}
@@ -602,7 +617,7 @@ def booking_calendar(year: int = None, month: int = None):
             }}
             .search-link {{ text-align: center; margin-bottom: 16px; }}
             .search-link a {{ color: #222; font-size: 13px; }}
-            table {{ border-collapse: collapse; width: 100%; }}
+            table {{ border-collapse: collapse; width: 100%; table-layout: fixed; }}
             th {{ padding: 8px; color: #666; font-size: 13px; }}
             td {{
                 border-radius: 10px; text-align: center; padding: 10px 4px;
@@ -652,6 +667,28 @@ def booking_calendar(year: int = None, month: int = None):
                 border: none; border-radius: 6px; cursor: pointer; font-weight: bold;
             }}
             .book-msg {{ margin-top: 8px; font-size: 13px; }}
+
+            /* Tablet */
+            @media (max-width: 900px) {{
+                body {{ padding: 16px; gap: 16px; }}
+                .calendar-container {{ max-width: 100%; }}
+                .panel {{ width: 100%; max-width: 700px; }}
+            }}
+
+            /* Mobile */
+            @media (max-width: 480px) {{
+                body {{ padding: 10px; gap: 12px; }}
+                .calendar-container {{ padding: 14px; border-radius: 12px; }}
+                .panel {{ padding: 14px; border-radius: 12px; }}
+                h2 {{ font-size: 18px; }}
+                .nav a {{ padding: 5px 10px; font-size: 12px; }}
+                th {{ padding: 4px 2px; font-size: 10px; }}
+                td {{ padding: 6px 2px; border-radius: 6px; }}
+                .day-num {{ font-size: 13px; }}
+                .count {{ font-size: 9px; }}
+                .room-row {{ font-size: 12px; padding: 6px; }}
+                .times {{ font-size: 11px; }}
+            }}
         </style>
     </head>
     <body>
