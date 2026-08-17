@@ -79,10 +79,8 @@ def format_whatsapp_number(phone: str) -> str:
 
 
 def room_label(room_id) -> str:
-    """Returns a display label for a room, adding a type tag for specific rooms."""
-    if int(room_id) == 4:
-        return "Room 4(Regular)"
-    return f"Room {room_id}"
+    """Returns a display label for a room, including its type tag."""
+    return f"Room {room_id}(Regular)"
 
 
 @app.post("/bookings")
@@ -431,7 +429,7 @@ def search_page():
             let bookingCheckin, bookingCheckout;
 
             function roomLabel(id) {{
-                return id == 4 ? "Room 4(Regular)" : "Room " + id;
+                return "Room " + id + "(Regular)";
             }}
 
             document.getElementById('checkin').addEventListener('change', function() {{
@@ -726,7 +724,7 @@ def booking_calendar(year: int = None, month: int = None):
             let selectedRoom = null;
 
             function roomLabel(id) {{
-                return id == 4 ? "Room 4(Regular)" : "Room " + id;
+                return "Room " + id + "(Regular)";
             }}
 
             async function showDetails(dateStr) {{
