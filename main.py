@@ -115,7 +115,7 @@ def create_booking(booking: BookingRequest):
         twilio_client.messages.create(
             from_=TWILIO_FROM,
             to=notify_number,
-            body=f"Booking confirmed!\nBooking ID: BK{new_booking.id:04d}\nGuest: {booking.guest_name} ({booking.guest_phone})\n{room_label(booking.room_id)}, {booking.check_in} to {booking.check_out}"
+            body=f"Booking confirmed!\nBooking ID: BK{new_booking.id:04d}\nGuest: {booking.guest_name}\nPhone: {booking.guest_phone}\n{room_label(booking.room_id)}\nCheck-in: {booking.check_in}\nCheck-out: {booking.check_out}"
         )
     except Exception as e:
         print("Failed to send WhatsApp confirmation:", e)
@@ -430,6 +430,10 @@ def search_page():
             let selectedRoom = null;
             let bookingCheckin, bookingCheckout;
 
+            function roomLabel(id) {{
+                return id == 4 ? "Room 4(Regular)" : "Room " + id;
+            }}
+
             document.getElementById('checkin').addEventListener('change', function() {{
                 document.getElementById('checkout').min = this.value;
             }});
@@ -460,7 +464,7 @@ def search_page():
                 data.rooms.forEach(r => {{
                     if (r.available) {{
                         html += "<div class='room-card room-available' onclick='selectRoom(" + r.room_id + ", \\"" + checkin + "\\", \\"" + checkout + "\\")'>" +
-                            "Room " + r.room_id + "<span class='badge'>Available — tap to book</span></div>";
+                            roomLabel(r.room_id) + "<span class='badge'>Available — tap to book</span></div>";
                     }} else {{
                         html += "<div class='room-card room-booked'>Room " + r.room_id +
                             "<span class='badge'>Booked</span></div>";
@@ -475,7 +479,7 @@ def search_page():
                 bookingCheckin = checkin;
                 bookingCheckout = checkout;
                 document.getElementById('roomLabel').innerText =
-                    "Room " + roomId + " (" + checkin + " to " + checkout + ")";
+                    roomLabel(roomId) + " (" + checkin + " to " + checkout + ")";
                 document.getElementById('bookForm').style.display = 'block';
                 document.getElementById('bookMsg').innerText = '';
             }}
@@ -721,6 +725,10 @@ def booking_calendar(year: int = None, month: int = None):
             let selectedDate = null;
             let selectedRoom = null;
 
+            function roomLabel(id) {{
+                return id == 4 ? "Room 4(Regular)" : "Room " + id;
+            }}
+
             async function showDetails(dateStr) {{
                 selectedDate = dateStr;
                 const panel = document.getElementById('panel');
@@ -735,14 +743,14 @@ def booking_calendar(year: int = None, month: int = None):
                 if (data.bookings.length > 0) {{
                     html += "<div><b>Booked rooms:</b></div>";
                     data.bookings.forEach(b => {{
-                        html += "<div class='room-row room-booked'>Room " + b.room_id + " — " + b.guest_name + " (" + b.guest_phone + ") — <b>Booking ID: BK" + String(b.booking_id).padStart(4, '0') + "</b></div>";
+                        html += "<div class='room-row room-booked'>" + roomLabel(b.room_id) + " — " + b.guest_name + " (" + b.guest_phone + ") — <b>Booking ID: BK" + String(b.booking_id).padStart(4, '0') + "</b></div>";
                     }});
                 }}
 
                 if (data.available_rooms.length > 0) {{
                     html += "<div style='margin-top:10px;'><b>Available rooms (click to book):</b></div>";
                     data.available_rooms.forEach(r => {{
-                        html += "<div class='room-row room-available' onclick='openBookForm(" + r + ")'>Room " + r + "</div>";
+                        html += "<div class='room-row room-available' onclick='openBookForm(" + r + ")'>" + roomLabel(r) + "</div>";
                     }});
                 }}
 
@@ -763,7 +771,7 @@ def booking_calendar(year: int = None, month: int = None):
 
             function openBookForm(roomId) {{
                 selectedRoom = roomId;
-                document.getElementById('bookRoomLabel').innerText = "Room " + roomId + " — check-in " + selectedDate;
+                document.getElementById('bookRoomLabel').innerText = roomLabel(roomId) + " — check-in " + selectedDate;
                 document.getElementById('bookForm').style.display = 'block';
                 document.getElementById('bookMsg').innerText = '';
             }}
@@ -839,9 +847,11 @@ async def whatsapp_webhook(Body: str = Form(...), From: str = Form(...)):
                     reply = (
                         f"Last booking:\n"
                         f"Booking ID: BK{last_booking.id:04d}\n"
+                        f"Guest: {last_booking.guest_name}\n"
+                        f"Phone: {last_booking.guest_phone}\n"
                         f"{room_label(last_booking.room_id)}\n"
-                        f"Guest: {last_booking.guest_name} ({last_booking.guest_phone})\n"
-                        f"Dates: {last_booking.check_in} to {last_booking.check_out}"
+                        f"Check-in: {last_booking.check_in}\n"
+                        f"Check-out: {last_booking.check_out}"
                     )
                 else:
                     reply = "No bookings found yet."
