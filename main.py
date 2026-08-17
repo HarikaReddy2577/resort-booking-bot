@@ -78,6 +78,13 @@ def format_whatsapp_number(phone: str) -> str:
     return f"whatsapp:+91{cleaned}"
 
 
+def room_label(room_id) -> str:
+    """Returns a display label for a room, adding a type tag for specific rooms."""
+    if int(room_id) == 4:
+        return "Room 4(Regular)"
+    return f"Room {room_id}"
+
+
 @app.post("/bookings")
 def create_booking(booking: BookingRequest):
     if booking.check_in < date_type.today():
@@ -108,7 +115,7 @@ def create_booking(booking: BookingRequest):
         twilio_client.messages.create(
             from_=TWILIO_FROM,
             to=notify_number,
-            body=f"Booking confirmed!\nBooking ID: BK{new_booking.id:04d}\nRoom {booking.room_id}, {booking.check_in} to {booking.check_out}"
+            body=f"Booking confirmed!\nBooking ID: BK{new_booking.id:04d}\nGuest: {booking.guest_name} ({booking.guest_phone})\n{room_label(booking.room_id)}, {booking.check_in} to {booking.check_out}"
         )
     except Exception as e:
         print("Failed to send WhatsApp confirmation:", e)
@@ -832,7 +839,7 @@ async def whatsapp_webhook(Body: str = Form(...), From: str = Form(...)):
                     reply = (
                         f"Last booking:\n"
                         f"Booking ID: BK{last_booking.id:04d}\n"
-                        f"Room: {last_booking.room_id}\n"
+                        f"{room_label(last_booking.room_id)}\n"
                         f"Guest: {last_booking.guest_name} ({last_booking.guest_phone})\n"
                         f"Dates: {last_booking.check_in} to {last_booking.check_out}"
                     )
