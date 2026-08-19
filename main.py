@@ -88,6 +88,9 @@ def create_booking(booking: BookingRequest):
     if booking.check_in < date_type.today():
         raise HTTPException(status_code=400, detail="Check-in date cannot be in the past")
 
+    if booking.check_out <= booking.check_in:
+        raise HTTPException(status_code=400, detail="Check-out date must be after check-in date")
+
     if has_conflict(booking.room_id, booking.check_in, booking.check_out):
         raise HTTPException(status_code=409, detail="Room already booked for these dates")
 
@@ -219,17 +222,6 @@ def departures_today():
 
 @app.get("/day-details")
 def day_details(date: date_type):
-    if date < date_type.today():
-        return {
-            "date": str(date),
-            "total_rooms": 0,
-            "booked_count": 0,
-            "available_count": 0,
-            "bookings": [],
-            "available_rooms": [],
-            "error": "This date is in the past."
-        }
-
     session = SessionLocal()
     all_rooms = session.query(Room).all()
     bookings = session.query(Booking).filter(
@@ -250,6 +242,7 @@ def day_details(date: date_type):
         "total_rooms": len(all_rooms),
         "booked_count": len(booked_list),
         "available_count": len(all_rooms) - len(booked_list),
+        "is_past": date < date_type.today(),
         "bookings": booked_list,
         "available_rooms": available_rooms
     }
@@ -569,10 +562,11 @@ def booking_calendar(year: int = None, month: int = None):
                 this_date = date_type(year, month, day)
 
                 if this_date < today:
+                    count = day_counts.get(day, 0)
                     rows += f"""
-                    <td class='past'>
+                    <td class='past' onclick="showDetails('{date_str}')">
                         <div class='day-num'>{day}</div>
-                        <div class='count'>Past</div>
+                        <div class='count'>{count} booked</div>
                     </td>
                     """
                 else:
@@ -640,8 +634,7 @@ def booking_calendar(year: int = None, month: int = None):
             .free {{ background: #dcf5e0; }}
             .partial {{ background: #fdeecb; }}
             .full {{ background: #fbdada; }}
-            .past {{ background: #eee; color: #aaa; cursor: default; }}
-            .past:hover {{ transform: none; }}
+            .past {{ background: #eee; color: #999; cursor: pointer; }}
 
             .panel {{
                 background: white; border-radius: 16px;
@@ -657,6 +650,7 @@ def booking_calendar(year: int = None, month: int = None):
                 padding: 8px; border-radius: 8px; margin-bottom: 6px; font-size: 14px;
             }}
             .room-booked {{ background: #fbdada; }}
+            .room-past {{ background: #e8e8e8; color: #777; }}
             .room-available {{
                 background: #dcf5e0; cursor: pointer; transition: background 0.15s ease;
             }}
@@ -734,15 +728,22 @@ def booking_calendar(year: int = None, month: int = None):
                 const res = await fetch('/day-details?date=' + dateStr);
                 const data = await res.json();
 
-                let html = "<h3>" + dateStr + "</h3>";
+                let html = "<h3>" + dateStr + (data.is_past ? " <span style='font-size:12px; font-weight:normal; color:#999;'>(Past)</span>" : "") + "</h3>";
                 html += "<div class='times'>Check-in: 12:00 PM &nbsp;|&nbsp; Check-out: 11:00 AM</div>";
                 html += "<p><b>" + data.booked_count + "</b> booked / <b>" + data.total_rooms + "</b> total rooms</p>";
 
                 if (data.bookings.length > 0) {{
                     html += "<div><b>Booked rooms:</b></div>";
                     data.bookings.forEach(b => {{
-                        html += "<div class='room-row room-booked'>" + roomLabel(b.room_id) + " — " + b.guest_name + " (" + b.guest_phone + ") — <b>Booking ID: BK" + String(b.booking_id).padStart(4, '0') + "</b></div>";
+                        const rowClass = data.is_past ? "room-row room-past" : "room-row room-booked";
+                        html += "<div class='" + rowClass + "'>" + roomLabel(b.room_id) + " — " + b.guest_name + " (" + b.guest_phone + ") — <b>Booking ID: BK" + String(b.booking_id).padStart(4, '0') + "</b></div>";
                     }});
+                }}
+
+                if (data.is_past) {{
+                    html += "<div style='margin-top:10px; font-size:12px; color:#999;'>This date has passed. Booking is disabled, but past reservations remain visible above.</div>";
+                    panel.innerHTML = html;
+                    return;
                 }}
 
                 if (data.available_rooms.length > 0) {{
@@ -772,6 +773,14 @@ def booking_calendar(year: int = None, month: int = None):
                 document.getElementById('bookRoomLabel').innerText = roomLabel(roomId) + " — check-in " + selectedDate;
                 document.getElementById('bookForm').style.display = 'block';
                 document.getElementById('bookMsg').innerText = '';
+
+                const checkinDate = new Date(selectedDate + "T00:00:00");
+                const minCheckout = new Date(checkinDate);
+                minCheckout.setDate(minCheckout.getDate() + 1);
+                const minCheckoutStr = minCheckout.toISOString().split('T')[0];
+                const checkoutInput = document.getElementById('checkoutInput');
+                checkoutInput.min = minCheckoutStr;
+                checkoutInput.value = '';
             }}
 
             async function submitBooking() {{
@@ -783,6 +792,11 @@ def booking_calendar(year: int = None, month: int = None):
                 if (!checkout || !name || !phone) {{
                     msgBox.style.color = 'red';
                     msgBox.innerText = 'Please fill in check-out date, name, and phone.';
+                    return;
+                }}
+                if (checkout <= selectedDate) {{
+                    msgBox.style.color = 'red';
+                    msgBox.innerText = 'Check-out date must be after check-in date.';
                     return;
                 }}
 
